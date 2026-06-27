@@ -6,7 +6,7 @@ import type {
   LanguageMode,
   SampleQuizResponse,
   SubjectCode,
-} from "@trustos-learn/shared";
+} from "./types";
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;

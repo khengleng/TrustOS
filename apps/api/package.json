@@ -10,7 +10,6 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@trustos-learn/shared": "0.1.0",
     "cors": "^2.8.5",
     "express": "^4.21.2"
   },
