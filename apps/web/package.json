@@ -6,11 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "start": "vite preview --host 0.0.0.0 --port ${PORT:-4173}",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@trustos-learn/shared": "0.1.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
