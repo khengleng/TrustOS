@@ -7,9 +7,23 @@ import type {
   SubjectCode,
 } from "./types";
 
-const apiBaseUrl = (
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:3000"
-).replace(/\/$/, "");
+function getApiBaseUrl() {
+  const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
+  if (configuredBaseUrl) {
+    return configuredBaseUrl.replace(/\/$/, "");
+  }
+
+  if (typeof window !== "undefined") {
+    const hostname = window.location.hostname;
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return "http://localhost:3000";
+    }
+  }
+
+  return "https://trustos-learn-api-production.up.railway.app";
+}
+
+const apiBaseUrl = getApiBaseUrl();
 
 const grades: Array<{ value: GradeSelection; label: string }> = [
   { value: "grade-2", label: "Grade 2" },
@@ -63,8 +77,17 @@ export default function App() {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasStarted, setHasStarted] = useState(false);
 
   const isCorrect = selectedAnswer === quiz?.correctAnswer;
+  const hasQuestion = Boolean(quiz);
+
+  function clearCurrentQuiz() {
+    setQuiz(null);
+    setError(null);
+    setHasStarted(false);
+    resetQuestionState();
+  }
 
   function resetQuestionState() {
     setSelectedAnswer(null);
@@ -91,6 +114,7 @@ export default function App() {
 
       const data = (await response.json()) as SampleQuizResponse;
       setQuiz(data);
+      setHasStarted(true);
     } catch (requestError) {
       setQuiz(null);
       setError(
@@ -98,6 +122,7 @@ export default function App() {
           ? requestError.message
           : "Unable to load the quiz right now.",
       );
+      setHasStarted(false);
     } finally {
       setIsLoading(false);
     }
@@ -111,14 +136,34 @@ export default function App() {
     void fetchQuiz();
   }
 
+  function handleGradeChange(value: GradeSelection) {
+    setGrade(value);
+    clearCurrentQuiz();
+  }
+
+  function handleCurriculumChange(value: CurriculumCode) {
+    setCurriculum(value);
+    clearCurrentQuiz();
+  }
+
+  function handleSubjectChange(value: SubjectCode) {
+    setSubject(value);
+    clearCurrentQuiz();
+  }
+
+  function handleLanguageChange(value: LanguageMode) {
+    setLanguage(value);
+    clearCurrentQuiz();
+  }
+
   return (
     <main className="app-shell">
       <section className="hero">
-        <p className="eyebrow">TrustOS Learn MVP</p>
+        <p className="eyebrow">TrustOS Learn</p>
         <h1>Quiz Practice</h1>
         <p className="lead">
-          Choose your learning path, start a quiz, answer one question, and learn
-          from the explanation.
+          A simple, student-friendly quiz flow with hardcoded practice questions for
+          grade, curriculum, subject, and language selection.
         </p>
       </section>
 
@@ -126,13 +171,16 @@ export default function App() {
         <article className="panel controls-panel">
           <div className="panel-header">
             <h2>1. Choose Your Quiz</h2>
-            <p>Select the grade, curriculum, subject, and language before starting.</p>
+            <p>Pick the learning path first, then start a question when you are ready.</p>
           </div>
 
           <div className="form-grid">
             <label className="field">
               <span>Grade</span>
-              <select value={grade} onChange={(event) => setGrade(event.target.value as GradeSelection)}>
+              <select
+                value={grade}
+                onChange={(event) => handleGradeChange(event.target.value as GradeSelection)}
+              >
                 {grades.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
@@ -145,7 +193,7 @@ export default function App() {
               <span>Curriculum</span>
               <select
                 value={curriculum}
-                onChange={(event) => setCurriculum(event.target.value as CurriculumCode)}
+                onChange={(event) => handleCurriculumChange(event.target.value as CurriculumCode)}
               >
                 {curricula.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -157,7 +205,10 @@ export default function App() {
 
             <label className="field">
               <span>Subject</span>
-              <select value={subject} onChange={(event) => setSubject(event.target.value as SubjectCode)}>
+              <select
+                value={subject}
+                onChange={(event) => handleSubjectChange(event.target.value as SubjectCode)}
+              >
                 {subjects.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
@@ -170,7 +221,7 @@ export default function App() {
               <span>Language</span>
               <select
                 value={language}
-                onChange={(event) => setLanguage(event.target.value as LanguageMode)}
+                onChange={(event) => handleLanguageChange(event.target.value as LanguageMode)}
               >
                 {languages.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -181,6 +232,12 @@ export default function App() {
             </label>
           </div>
 
+          <div className="mini-note">
+            {language === "bilingual"
+              ? "Bilingual mode shows English and Khmer side by side."
+              : "Questions stay simple and readable for practice mode."}
+          </div>
+
           <div className="selection-summary">
             <span>{grades.find((item) => item.value === grade)?.label}</span>
             <span>{labelMap[curriculum]}</span>
@@ -189,8 +246,13 @@ export default function App() {
           </div>
 
           <div className="actions actions-stack">
-            <button type="button" className="primary-button" onClick={handleStartQuiz} disabled={isLoading}>
-              {isLoading ? "Loading..." : "Start Quiz"}
+            <button
+              type="button"
+              className="primary-button"
+              onClick={handleStartQuiz}
+              disabled={isLoading}
+            >
+              {isLoading ? "Loading..." : hasQuestion ? "Restart Quiz" : "Start Quiz"}
             </button>
           </div>
         </article>
@@ -198,20 +260,20 @@ export default function App() {
         <article className="panel question-panel">
           <div className="panel-header">
             <h2>2. Practice Question</h2>
-            <p>Questions are loaded from the API using the selected quiz settings.</p>
+            <p>Read the question, choose one answer, then review the explanation.</p>
           </div>
 
-          {!quiz && !isLoading && !error ? (
+          {!hasStarted && !isLoading && !error ? (
             <section className="feedback feedback-pending">
               <h4>Ready to begin</h4>
-              <p>Click “Start Quiz” to load your first question.</p>
+              <p>Click “Start Quiz” to load your first hardcoded practice question.</p>
             </section>
           ) : null}
 
           {isLoading ? (
             <section className="feedback feedback-pending">
               <h4>Loading question...</h4>
-              <p>Getting a quiz question from the TrustOS Learn API.</p>
+              <p>Getting a quiz question from the TrustOS Learn question bank.</p>
             </section>
           ) : null}
 
@@ -229,6 +291,15 @@ export default function App() {
                 <span>{labelMap[curriculum]}</span>
                 <span>{labelMap[subject]}</span>
                 <span>{labelMap[language]}</span>
+              </div>
+
+              <div className="question-stage">
+                <span className="stage-badge">Question Ready</span>
+                <p>
+                  {isSubmitted
+                    ? "Review the explanation below, then move to the next question."
+                    : "Choose the best answer for this question."}
+                </p>
               </div>
 
               <h3 className="question-prompt">{quiz.question}</h3>
@@ -251,7 +322,7 @@ export default function App() {
                       type="button"
                       className={`answer answer-${answerState}`}
                       onClick={() => setSelectedAnswer(choice)}
-                      disabled={isLoading}
+                      disabled={isLoading || isSubmitted}
                     >
                       <span className="answer-key">{String.fromCharCode(65 + index)}</span>
                       <span>{choice}</span>
@@ -276,12 +347,12 @@ export default function App() {
                   onClick={handleNextQuestion}
                   disabled={isLoading}
                 >
-                  Next Question
+                  {hasQuestion ? "Next Question" : "Load Question"}
                 </button>
               </div>
 
               {isSubmitted ? (
-                <section className={`feedback ${isCorrect ? "feedback-correct" : "feedback-wrong"}`}>
+                <section className={`feedback result-card ${isCorrect ? "feedback-correct" : "feedback-wrong"}`}>
                   <h4>{isCorrect ? "Correct" : "Wrong answer"}</h4>
                   <p>{quiz.explanation}</p>
                 </section>
