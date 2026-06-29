@@ -4,6 +4,8 @@ export type LanguageMode = "english" | "khmer" | "bilingual";
 
 export type SubjectCode = "math" | "science" | "english" | "khmer";
 
+export type DifficultyLevel = "easy" | "medium" | "hard";
+
 export type GradeLevel =
   | "grade-1"
   | "grade-2"
@@ -24,6 +26,19 @@ export interface SampleQuizResponse {
   curriculum: CurriculumCode;
   subject: SubjectCode;
   language: LanguageMode;
+  question: string;
+  choices: string[];
+  correctAnswer: string;
+  explanation: string;
+}
+
+export interface GeneratedQuizResponse {
+  id: string;
+  grade: number;
+  curriculum: string;
+  subject: string;
+  language: string;
+  difficulty: string;
   question: string;
   choices: string[];
   correctAnswer: string;

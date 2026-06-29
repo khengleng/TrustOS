@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   CurriculumCode,
+  DifficultyLevel,
   GradeSelection,
   LanguageMode,
-  SampleQuizResponse,
+  QuizResponse,
   SubjectCode,
 } from "./types";
 
@@ -57,7 +58,13 @@ const languages: Array<{ value: LanguageMode; label: string }> = [
   { value: "bilingual", label: "Bilingual" },
 ];
 
-const labelMap: Record<CurriculumCode | LanguageMode | SubjectCode, string> = {
+const difficulties: Array<{ value: DifficultyLevel; label: string }> = [
+  { value: "easy", label: "Easy" },
+  { value: "medium", label: "Medium" },
+  { value: "hard", label: "Hard" },
+];
+
+const labelMap: Record<CurriculumCode | LanguageMode | SubjectCode | DifficultyLevel, string> = {
   cambridge: "Cambridge",
   moeys: "Cambodia MoEYS",
   english: "English",
@@ -65,56 +72,106 @@ const labelMap: Record<CurriculumCode | LanguageMode | SubjectCode, string> = {
   bilingual: "Bilingual",
   math: "Math",
   science: "Science",
+  easy: "Easy",
+  medium: "Medium",
+  hard: "Hard",
 };
 
+type Screen = "home" | "setup" | "practice";
+
+function getAvailableSubjects(
+  grade: GradeSelection,
+  curriculum: CurriculumCode,
+): Array<{ value: SubjectCode; label: string }> {
+  if (curriculum === "cambridge") {
+    return subjects.filter((option) => option.value !== "khmer");
+  }
+
+  if (grade === "grade-2" || grade === "grade-3") {
+    return subjects.filter((option) => option.value !== "science");
+  }
+
+  return subjects;
+}
+
 export default function App() {
+  const [screen, setScreen] = useState<Screen>("home");
   const [grade, setGrade] = useState<GradeSelection>("grade-6");
   const [curriculum, setCurriculum] = useState<CurriculumCode>("cambridge");
   const [subject, setSubject] = useState<SubjectCode>("math");
   const [language, setLanguage] = useState<LanguageMode>("english");
-  const [quiz, setQuiz] = useState<SampleQuizResponse | null>(null);
+  const [difficulty, setDifficulty] = useState<DifficultyLevel>("medium");
+  const [quiz, setQuiz] = useState<QuizResponse | null>(null);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [hasStarted, setHasStarted] = useState(false);
+  const [questionNumber, setQuestionNumber] = useState(0);
+  const [correctCount, setCorrectCount] = useState(0);
+  const [score, setScore] = useState(0);
 
+  const availableSubjects = getAvailableSubjects(grade, curriculum);
   const isCorrect = selectedAnswer === quiz?.correctAnswer;
-  const hasQuestion = Boolean(quiz);
+  const answeredCount = Math.max(questionNumber - 1, 0) + (isSubmitted ? 1 : 0);
 
-  function clearCurrentQuiz() {
+  useEffect(() => {
+    if (!availableSubjects.some((option) => option.value === subject)) {
+      setSubject(availableSubjects[0]?.value ?? "math");
+    }
+  }, [availableSubjects, subject]);
+
+  function resetCurrentQuestion() {
     setQuiz(null);
-    setError(null);
-    setHasStarted(false);
-    resetQuestionState();
-  }
-
-  function resetQuestionState() {
     setSelectedAnswer(null);
     setIsSubmitted(false);
+    setError(null);
   }
 
-  async function fetchQuiz() {
+  function resetSession() {
+    resetCurrentQuestion();
+    setQuestionNumber(0);
+    setCorrectCount(0);
+    setScore(0);
+  }
+
+  function updateScore(nextCorrectCount: number, nextAnsweredCount: number) {
+    if (nextAnsweredCount === 0) {
+      setScore(0);
+      return;
+    }
+
+    setScore(Math.round((nextCorrectCount / nextAnsweredCount) * 100));
+  }
+
+  async function fetchQuiz(nextQuestionNumber: number) {
     setIsLoading(true);
     setError(null);
-    resetQuestionState();
+    setSelectedAnswer(null);
+    setIsSubmitted(false);
 
     try {
-      const query = new URLSearchParams({
-        grade,
-        curriculum,
-        subject,
-        language,
+      const response = await fetch(`${apiBaseUrl}/api/quiz/generate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          grade,
+          curriculum,
+          subject,
+          language,
+          difficulty,
+        }),
       });
 
-      const response = await fetch(`${apiBaseUrl}/api/quiz/sample?${query.toString()}`);
       if (!response.ok) {
         throw new Error(`Request failed with status ${response.status}`);
       }
 
-      const data = (await response.json()) as SampleQuizResponse;
+      const data = (await response.json()) as QuizResponse;
       setQuiz(data);
-      setHasStarted(true);
+      setQuestionNumber(nextQuestionNumber);
+      setScreen("practice");
     } catch (requestError) {
       setQuiz(null);
       setError(
@@ -122,65 +179,96 @@ export default function App() {
           ? requestError.message
           : "Unable to load the quiz right now.",
       );
-      setHasStarted(false);
+      setScreen("practice");
     } finally {
       setIsLoading(false);
     }
   }
 
+  function handleStartLearning() {
+    resetSession();
+    setScreen("setup");
+  }
+
+  function handleBackToHome() {
+    resetSession();
+    setScreen("home");
+  }
+
   function handleStartQuiz() {
-    void fetchQuiz();
+    resetSession();
+    void fetchQuiz(1);
+  }
+
+  function handleSubmitAnswer() {
+    if (!quiz || !selectedAnswer || isSubmitted) {
+      return;
+    }
+
+    const nextAnsweredCount = answeredCount + 1;
+    const nextCorrectCount = correctCount + (selectedAnswer === quiz.correctAnswer ? 1 : 0);
+    setIsSubmitted(true);
+    setCorrectCount(nextCorrectCount);
+    updateScore(nextCorrectCount, nextAnsweredCount);
   }
 
   function handleNextQuestion() {
-    void fetchQuiz();
+    if (!isSubmitted) {
+      return;
+    }
+
+    void fetchQuiz(questionNumber + 1);
   }
 
-  function handleGradeChange(value: GradeSelection) {
-    setGrade(value);
-    clearCurrentQuiz();
-  }
+  function renderHome() {
+    return (
+      <section className="hero hero-home">
+        <div className="hero-copy">
+          <p className="eyebrow">TrustOS Learn v0.1</p>
+          <h1>Learn with simple, guided quiz practice.</h1>
+          <p className="lead">
+            A clean education experience for Grade 2 to Grade 12 with curriculum,
+            subject, and language selection built around short, understandable quiz
+            practice.
+          </p>
+          <div className="hero-actions">
+            <button type="button" className="primary-button hero-button" onClick={handleStartLearning}>
+              Start Learning
+            </button>
+          </div>
+        </div>
 
-  function handleCurriculumChange(value: CurriculumCode) {
-    setCurriculum(value);
-    clearCurrentQuiz();
-  }
-
-  function handleSubjectChange(value: SubjectCode) {
-    setSubject(value);
-    clearCurrentQuiz();
-  }
-
-  function handleLanguageChange(value: LanguageMode) {
-    setLanguage(value);
-    clearCurrentQuiz();
-  }
-
-  return (
-    <main className="app-shell">
-      <section className="hero">
-        <p className="eyebrow">TrustOS Learn</p>
-        <h1>Quiz Practice</h1>
-        <p className="lead">
-          A simple, student-friendly quiz flow with hardcoded practice questions for
-          grade, curriculum, subject, and language selection.
-        </p>
+        <div className="hero-card">
+          <div className="hero-stat">
+            <strong>Grades</strong>
+            <span>2 to 12</span>
+          </div>
+          <div className="hero-stat">
+            <strong>Curricula</strong>
+            <span>Cambridge and Cambodia MoEYS</span>
+          </div>
+          <div className="hero-stat">
+            <strong>Languages</strong>
+            <span>English, Khmer, Bilingual</span>
+          </div>
+        </div>
       </section>
+    );
+  }
 
-      <section className="workspace">
-        <article className="panel controls-panel">
+  function renderSetup() {
+    return (
+      <section className="workspace workspace-single">
+        <article className="panel setup-panel">
           <div className="panel-header">
-            <h2>1. Choose Your Quiz</h2>
-            <p>Pick the learning path first, then start a question when you are ready.</p>
+            <h2>Quiz Setup</h2>
+            <p>Choose the learning path for this practice session.</p>
           </div>
 
           <div className="form-grid">
             <label className="field">
               <span>Grade</span>
-              <select
-                value={grade}
-                onChange={(event) => handleGradeChange(event.target.value as GradeSelection)}
-              >
+              <select value={grade} onChange={(event) => setGrade(event.target.value as GradeSelection)}>
                 {grades.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
@@ -193,7 +281,7 @@ export default function App() {
               <span>Curriculum</span>
               <select
                 value={curriculum}
-                onChange={(event) => handleCurriculumChange(event.target.value as CurriculumCode)}
+                onChange={(event) => setCurriculum(event.target.value as CurriculumCode)}
               >
                 {curricula.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -205,11 +293,8 @@ export default function App() {
 
             <label className="field">
               <span>Subject</span>
-              <select
-                value={subject}
-                onChange={(event) => handleSubjectChange(event.target.value as SubjectCode)}
-              >
-                {subjects.map((option) => (
+              <select value={subject} onChange={(event) => setSubject(event.target.value as SubjectCode)}>
+                {availableSubjects.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
@@ -221,9 +306,23 @@ export default function App() {
               <span>Language</span>
               <select
                 value={language}
-                onChange={(event) => handleLanguageChange(event.target.value as LanguageMode)}
+                onChange={(event) => setLanguage(event.target.value as LanguageMode)}
               >
                 {languages.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>Difficulty</span>
+              <select
+                value={difficulty}
+                onChange={(event) => setDifficulty(event.target.value as DifficultyLevel)}
+              >
+                {difficulties.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
@@ -234,8 +333,8 @@ export default function App() {
 
           <div className="mini-note">
             {language === "bilingual"
-              ? "Bilingual mode shows English and Khmer side by side."
-              : "Questions stay simple and readable for practice mode."}
+              ? "Bilingual mode displays Khmer and English together. Language changes presentation only."
+              : "Language changes presentation only. Subject availability depends on grade and curriculum."}
           </div>
 
           <div className="selection-summary">
@@ -243,37 +342,77 @@ export default function App() {
             <span>{labelMap[curriculum]}</span>
             <span>{labelMap[subject]}</span>
             <span>{labelMap[language]}</span>
+            <span>{labelMap[difficulty]}</span>
           </div>
 
           <div className="actions actions-stack">
-            <button
-              type="button"
-              className="primary-button"
-              onClick={handleStartQuiz}
-              disabled={isLoading}
-            >
-              {isLoading ? "Loading..." : hasQuestion ? "Restart Quiz" : "Start Quiz"}
+            <button type="button" className="secondary-button" onClick={handleBackToHome}>
+              Back
+            </button>
+            <button type="button" className="primary-button" onClick={handleStartQuiz}>
+              Start Quiz
+            </button>
+          </div>
+        </article>
+      </section>
+    );
+  }
+
+  function renderPractice() {
+    return (
+      <section className="workspace">
+        <article className="panel progress-panel">
+          <div className="panel-header">
+            <h2>Progress</h2>
+            <p>Track how you are doing in this session.</p>
+          </div>
+
+          <div className="progress-grid">
+            <div className="progress-card">
+              <span>Question</span>
+              <strong>{questionNumber || 1}</strong>
+            </div>
+            <div className="progress-card">
+              <span>Correct</span>
+              <strong>{correctCount}</strong>
+            </div>
+            <div className="progress-card">
+              <span>Score</span>
+              <strong>{score}%</strong>
+            </div>
+          </div>
+
+          <div className="selection-summary">
+            <span>{grades.find((item) => item.value === grade)?.label}</span>
+            <span>{labelMap[curriculum]}</span>
+            <span>{labelMap[subject]}</span>
+            <span>{labelMap[language]}</span>
+            <span>{labelMap[difficulty]}</span>
+          </div>
+
+          <div className="mini-note">
+            {answeredCount === 0
+              ? "Your score will update after you submit your first answer."
+              : `You have answered ${answeredCount} question${answeredCount > 1 ? "s" : ""} so far.`}
+          </div>
+
+          <div className="actions actions-stack">
+            <button type="button" className="secondary-button" onClick={() => setScreen("setup")}>
+              Change Setup
             </button>
           </div>
         </article>
 
         <article className="panel question-panel">
           <div className="panel-header">
-            <h2>2. Practice Question</h2>
-            <p>Read the question, choose one answer, then review the explanation.</p>
+            <h2>Quiz Practice</h2>
+            <p>Read the question, choose one answer, and learn from the explanation.</p>
           </div>
-
-          {!hasStarted && !isLoading && !error ? (
-            <section className="feedback feedback-pending">
-              <h4>Ready to begin</h4>
-              <p>Click “Start Quiz” to load your first hardcoded practice question.</p>
-            </section>
-          ) : null}
 
           {isLoading ? (
             <section className="feedback feedback-pending">
               <h4>Loading question...</h4>
-              <p>Getting a quiz question from the TrustOS Learn question bank.</p>
+              <p>Generating a quiz question for your selected learning setup.</p>
             </section>
           ) : null}
 
@@ -286,18 +425,11 @@ export default function App() {
 
           {quiz ? (
             <>
-              <div className="question-meta">
-                <span>{grades.find((item) => item.value === grade)?.label}</span>
-                <span>{labelMap[curriculum]}</span>
-                <span>{labelMap[subject]}</span>
-                <span>{labelMap[language]}</span>
-              </div>
-
               <div className="question-stage">
-                <span className="stage-badge">Question Ready</span>
+                <span className="stage-badge">Question {questionNumber}</span>
                 <p>
                   {isSubmitted
-                    ? "Review the explanation below, then move to the next question."
+                    ? "Read the explanation, then continue to the next question."
                     : "Choose the best answer for this question."}
                 </p>
               </div>
@@ -335,19 +467,18 @@ export default function App() {
                 <button
                   type="button"
                   className="primary-button"
-                  onClick={() => setIsSubmitted(true)}
+                  onClick={handleSubmitAnswer}
                   disabled={!selectedAnswer || isSubmitted}
                 >
-                  Check Answer
+                  Submit Answer
                 </button>
-
                 <button
                   type="button"
                   className="secondary-button"
                   onClick={handleNextQuestion}
-                  disabled={isLoading}
+                  disabled={!isSubmitted || isLoading}
                 >
-                  {hasQuestion ? "Next Question" : "Load Question"}
+                  Next Question
                 </button>
               </div>
 
@@ -359,13 +490,26 @@ export default function App() {
               ) : (
                 <section className="feedback feedback-pending">
                   <h4>Choose one answer</h4>
-                  <p>Select the best answer, then click “Check Answer” to see the explanation.</p>
+                  <p>Select one answer and press “Submit Answer” to check your result.</p>
                 </section>
               )}
             </>
+          ) : !isLoading && !error ? (
+            <section className="feedback feedback-pending">
+              <h4>Loading your session</h4>
+              <p>Preparing quiz practice based on your selected setup.</p>
+            </section>
           ) : null}
         </article>
       </section>
+    );
+  }
+
+  return (
+    <main className="app-shell">
+      {screen === "home" ? renderHome() : null}
+      {screen === "setup" ? renderSetup() : null}
+      {screen === "practice" ? renderPractice() : null}
     </main>
   );
 }

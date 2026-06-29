@@ -1,6 +1,6 @@
 # TrustOS Learn
 
-TrustOS Learn is a simple quiz practice MVP for students in Grade 2 through Grade 12. It supports Cambridge and Cambodia MoEYS curriculum selections, English and Khmer subjects, and English, Khmer, or bilingual quiz display.
+TrustOS Learn is a simple education quiz MVP for students in Grade 2 through Grade 12. It supports Cambridge and Cambodia MoEYS curriculum selections, English and Khmer subjects, and English, Khmer, or bilingual quiz display.
 
 This MVP is intentionally simple:
 
@@ -8,21 +8,22 @@ This MVP is intentionally simple:
 - Node.js + Express + TypeScript API in `apps/api`
 - Shared TypeScript types in `packages/shared`
 - Hardcoded quiz bank only
-- No OpenAI
+- Server-side OpenAI quiz generation with hardcoded fallback
 - No database
 - No login
 - No payments
 
-## User Flow
+## Current Experience
 
-1. Open the web app
-2. Select grade, curriculum, subject, and language
-3. Click `Start Quiz`
-4. Load one question from the API
-5. Choose one answer
+1. Open the homepage
+2. Click `Start Learning`
+3. Choose grade, curriculum, subject, and language
+4. Start quiz practice
+5. Answer one question at a time
 6. See correct or wrong feedback
 7. Read the explanation
-8. Click `Next Question`
+8. Continue with `Next Question`
+9. Track score, correct count, and current question number
 
 ## Project Structure
 
@@ -42,7 +43,7 @@ docs/
   ai-safety.md
 ```
 
-## Local Development
+## Local Run
 
 Install dependencies:
 
@@ -83,6 +84,7 @@ Current endpoints:
 
 - `GET /health`
 - `GET /api/quiz/sample?grade=grade-6&curriculum=cambridge&subject=math&language=english`
+- `POST /api/quiz/generate`
 
 The API returns one hardcoded quiz object with:
 
@@ -96,12 +98,50 @@ The API returns one hardcoded quiz object with:
 - `correctAnswer`
 - `explanation`
 
-## Deployment
+Example AI generation request:
 
-- `apps/web` can be deployed as a standard frontend app
-- `apps/api` is prepared for Railway deployment
+```bash
+curl -X POST http://localhost:3000/api/quiz/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "grade": "grade-4",
+    "curriculum": "cambridge",
+    "subject": "math",
+    "language": "bilingual",
+    "difficulty": "easy",
+    "topic": "fractions"
+  }'
+```
+
+## Railway Deployment
+
+- API root directory: `apps/api`
+- Web root directory: `apps/web`
+- API start command: `npm start`
+- Web start command: `npm start`
+- Railway API variables: `PORT`, `CORS_ORIGIN`, `OPENAI_API_KEY`
+- Optional Railway API variable: `OPENAI_MODEL=gpt-4.1-mini`
+- Do not set `OPENAI_API_KEY` on `apps/web`
 
 See [docs/deployment.md](docs/deployment.md) for details.
+
+## Current Limitations
+
+- AI generation depends on `OPENAI_API_KEY` being configured on the API service
+- If OpenAI fails, the API falls back to hardcoded quiz data
+- No login or student accounts
+- No database persistence
+- No payments
+- No analytics
+- No teacher dashboard or admin tools
+
+## Next Roadmap
+
+- Add larger curriculum-aligned quiz banks
+- Add multi-question quiz sessions with fixed sets
+- Add learner history and progress saving
+- Add teacher and parent views
+- Add AI-assisted content generation later, after the hardcoded MVP is stable
 
 ## License
 

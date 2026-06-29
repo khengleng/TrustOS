@@ -16,14 +16,75 @@ body {
   min-height: 100vh;
 }
 
+button,
+select {
+  font: inherit;
+}
+
 .app-shell {
-  width: min(100%, 72rem);
+  width: min(100%, 76rem);
   margin: 0 auto;
-  padding: 4rem 1.5rem 5rem;
+  padding: 3rem 1.5rem 5rem;
 }
 
 .hero {
   margin-bottom: 2.5rem;
+}
+
+.hero-home {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(18rem, 24rem);
+  gap: 1.25rem;
+  align-items: stretch;
+}
+
+.hero-copy,
+.hero-card {
+  border: 1px solid rgba(14, 165, 233, 0.14);
+  border-radius: 1.75rem;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.09);
+}
+
+.hero-copy {
+  padding: 2rem;
+}
+
+.hero-card {
+  display: grid;
+  gap: 0.9rem;
+  align-content: start;
+  padding: 1.5rem;
+}
+
+.hero-stat {
+  padding: 1rem 1.1rem;
+  border-radius: 1rem;
+  background: linear-gradient(180deg, #eff6ff 0%, #f8fafc 100%);
+}
+
+.hero-stat strong,
+.hero-stat span {
+  display: block;
+}
+
+.hero-stat strong {
+  margin-bottom: 0.35rem;
+  color: #0f172a;
+}
+
+.hero-stat span {
+  color: #475569;
+  line-height: 1.55;
+}
+
+.hero-actions {
+  margin-top: 1.5rem;
+}
+
+.hero-button {
+  min-width: 12rem;
 }
 
 .eyebrow {
@@ -36,13 +97,13 @@ body {
 
 h1 {
   margin: 0;
-  max-width: 10ch;
+  max-width: 12ch;
   font-size: clamp(2.8rem, 5vw, 4.75rem);
   line-height: 0.95;
 }
 
 .lead {
-  max-width: 46rem;
+  max-width: 44rem;
   font-size: 1.125rem;
   line-height: 1.7;
   color: #334155;
@@ -55,11 +116,16 @@ h1 {
   align-items: start;
 }
 
+.workspace-single {
+  grid-template-columns: minmax(0, 42rem);
+  justify-content: center;
+}
+
 .panel {
   padding: 1.5rem;
   border: 1px solid rgba(14, 165, 233, 0.14);
   border-radius: 1.5rem;
-  background: rgba(255, 255, 255, 0.78);
+  background: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(10px);
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.09);
 }
@@ -77,7 +143,9 @@ h1 {
 }
 
 .controls-panel,
-.question-panel {
+.question-panel,
+.progress-panel,
+.setup-panel {
   min-height: 100%;
 }
 
@@ -99,12 +167,19 @@ h1 {
 
 .field select {
   width: 100%;
-  padding: 0.85rem 0.95rem;
+  padding: 0.9rem 1rem;
   border: 1px solid rgba(148, 163, 184, 0.45);
-  border-radius: 0.95rem;
+  border-radius: 1rem;
   background: #fff;
   color: #0f172a;
-  font: inherit;
+}
+
+.field select:focus,
+.primary-button:focus,
+.secondary-button:focus,
+.answer:focus {
+  outline: 3px solid rgba(14, 165, 233, 0.18);
+  outline-offset: 2px;
 }
 
 .mini-note {
@@ -115,14 +190,6 @@ h1 {
   color: #475569;
   font-size: 0.95rem;
   line-height: 1.55;
-}
-
-.field select:focus,
-.primary-button:focus,
-.secondary-button:focus,
-.answer:focus {
-  outline: 3px solid rgba(14, 165, 233, 0.18);
-  outline-offset: 2px;
 }
 
 .selection-summary,
@@ -143,6 +210,34 @@ h1 {
   font-weight: 700;
 }
 
+.progress-grid {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 1rem;
+}
+
+.progress-card {
+  padding: 1rem;
+  border-radius: 1rem;
+  background: linear-gradient(180deg, #eff6ff 0%, #f8fafc 100%);
+}
+
+.progress-card span,
+.progress-card strong {
+  display: block;
+}
+
+.progress-card span {
+  font-size: 0.9rem;
+  color: #475569;
+}
+
+.progress-card strong {
+  margin-top: 0.35rem;
+  font-size: 1.8rem;
+  color: #0f172a;
+}
+
 .question-panel {
   display: grid;
   gap: 1.25rem;
@@ -150,7 +245,7 @@ h1 {
 
 .question-prompt {
   margin-bottom: 0;
-  font-size: clamp(1.35rem, 2vw, 1.75rem);
+  font-size: clamp(1.4rem, 2vw, 1.8rem);
   line-height: 1.35;
   color: #0f172a;
 }
@@ -199,7 +294,6 @@ h1 {
   border-radius: 1rem;
   background: #fff;
   color: #0f172a;
-  font: inherit;
   text-align: left;
   cursor: pointer;
   transition:
@@ -215,6 +309,10 @@ h1 {
   box-shadow: 0 12px 30px rgba(14, 165, 233, 0.08);
 }
 
+.answer:disabled {
+  cursor: default;
+}
+
 .answer-key {
   display: inline-grid;
   place-items: center;
@@ -224,10 +322,6 @@ h1 {
   background: #e2e8f0;
   color: #0f172a;
   font-weight: 800;
-}
-
-.answer:disabled {
-  cursor: default;
 }
 
 .answer-selected {
@@ -255,33 +349,27 @@ h1 {
   margin-top: 1.25rem;
 }
 
-.primary-button {
-  border: 0;
+.primary-button,
+.secondary-button {
   border-radius: 999px;
-  padding: 0.9rem 1.35rem;
-  background: linear-gradient(135deg, #0284c7 0%, #2563eb 100%);
-  color: #fff;
-  font: inherit;
+  padding: 0.95rem 1.35rem;
   font-weight: 700;
   cursor: pointer;
+}
+
+.primary-button {
+  border: 0;
+  background: linear-gradient(135deg, #0284c7 0%, #2563eb 100%);
+  color: #fff;
 }
 
 .secondary-button {
   border: 1px solid rgba(2, 132, 199, 0.18);
-  border-radius: 999px;
-  padding: 0.9rem 1.35rem;
   background: #ffffff;
   color: #0f172a;
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
 }
 
-.primary-button:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
+.primary-button:disabled,
 .secondary-button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
@@ -325,17 +413,22 @@ h1 {
   color: #991b1b;
 }
 
-@media (max-width: 860px) {
+@media (max-width: 900px) {
+  .hero-home,
   .workspace {
     grid-template-columns: 1fr;
   }
 
   .app-shell {
-    padding-top: 3rem;
+    padding-top: 2rem;
   }
 
   .question-stage {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  h1 {
+    max-width: 14ch;
   }
 }
