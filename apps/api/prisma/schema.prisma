@@ -1,0 +1,108 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum QuizStatus {
+  DRAFT
+  APPROVED
+  REJECTED
+}
+
+enum QuizSource {
+  HARDCODED
+  AI
+  TEACHER
+}
+
+model QuizDraft {
+  id            String     @id @default(cuid())
+  grade         String
+  curriculum    String
+  subject       String
+  language      String
+  difficulty    String
+  topic         String?
+  question      String
+  choices       Json
+  correctAnswer String
+  explanation   String
+  status        QuizStatus @default(DRAFT)
+  source        QuizSource
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  reviewedAt    DateTime?
+}
+
+model ApprovedQuiz {
+  id            String     @id
+  grade         String
+  curriculum    String
+  subject       String
+  language      String
+  difficulty    String
+  topic         String?
+  question      String
+  choices       Json
+  correctAnswer String
+  explanation   String
+  status        QuizStatus @default(APPROVED)
+  source        QuizSource
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  reviewedAt    DateTime?
+}
+
+model RejectedQuiz {
+  id            String     @id
+  grade         String
+  curriculum    String
+  subject       String
+  language      String
+  difficulty    String
+  topic         String?
+  question      String
+  choices       Json
+  correctAnswer String
+  explanation   String
+  status        QuizStatus @default(REJECTED)
+  source        QuizSource
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  reviewedAt    DateTime?
+}
+
+model LearningSession {
+  id             String        @id @default(cuid())
+  sessionId      String        @unique
+  grade          String
+  curriculum     String
+  subject        String
+  language       String
+  topic          String?
+  totalQuestions Int
+  correctAnswers Int           @default(0)
+  wrongAnswers   Int           @default(0)
+  scorePercent   Int           @default(0)
+  startedAt      DateTime      @default(now())
+  completedAt    DateTime?
+  attempts       QuizAttempt[]
+}
+
+model QuizAttempt {
+  id               String          @id @default(cuid())
+  sessionId        String
+  quizId           String
+  selectedAnswer   String
+  correctAnswer    String
+  isCorrect        Boolean
+  explanationShown Boolean         @default(false)
+  createdAt        DateTime        @default(now())
+  session          LearningSession @relation(fields: [sessionId], references: [sessionId], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+}

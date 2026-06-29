@@ -1,12 +1,18 @@
 import { useEffect, useState } from "react";
 import type {
+  CurriculumMapItem,
   CurriculumCode,
   DifficultyLevel,
   GradeSelection,
   LanguageMode,
+  LearningSessionReport,
+  LearningSessionSummary,
   QuizResponse,
   SubjectCode,
 } from "./types";
+
+const QUIZ_SESSION_STORAGE_KEY = "trustos-learn-session-id";
+const TOTAL_QUESTIONS = 5;
 
 function getApiBaseUrl() {
   const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
@@ -25,6 +31,22 @@ function getApiBaseUrl() {
 }
 
 const apiBaseUrl = getApiBaseUrl();
+
+function getStoredSessionId() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return window.sessionStorage.getItem(QUIZ_SESSION_STORAGE_KEY);
+}
+
+function setStoredSessionId(sessionId: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.sessionStorage.setItem(QUIZ_SESSION_STORAGE_KEY, sessionId);
+}
 
 const grades: Array<{ value: GradeSelection; label: string }> = [
   { value: "grade-2", label: "Grade 2" },
@@ -77,7 +99,7 @@ const labelMap: Record<CurriculumCode | LanguageMode | SubjectCode | DifficultyL
   hard: "Hard",
 };
 
-type Screen = "home" | "setup" | "practice";
+type Screen = "home" | "setup" | "practice" | "summary";
 
 function getAvailableSubjects(
   grade: GradeSelection,
@@ -101,6 +123,10 @@ export default function App() {
   const [subject, setSubject] = useState<SubjectCode>("math");
   const [language, setLanguage] = useState<LanguageMode>("english");
   const [difficulty, setDifficulty] = useState<DifficultyLevel>("medium");
+  const [curriculumItems, setCurriculumItems] = useState<CurriculumMapItem[]>([]);
+  const [selectedCurriculumItemKey, setSelectedCurriculumItemKey] = useState("");
+  const [isCurriculumLoading, setIsCurriculumLoading] = useState(false);
+  const [curriculumMessage, setCurriculumMessage] = useState<string | null>(null);
   const [quiz, setQuiz] = useState<QuizResponse | null>(null);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
@@ -109,16 +135,82 @@ export default function App() {
   const [questionNumber, setQuestionNumber] = useState(0);
   const [correctCount, setCorrectCount] = useState(0);
   const [score, setScore] = useState(0);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(getStoredSessionId());
+  const [sessionSummary, setSessionSummary] = useState<LearningSessionSummary | null>(null);
+  const [sessionReport, setSessionReport] = useState<LearningSessionReport | null>(null);
 
   const availableSubjects = getAvailableSubjects(grade, curriculum);
   const isCorrect = selectedAnswer === quiz?.correctAnswer;
   const answeredCount = Math.max(questionNumber - 1, 0) + (isSubmitted ? 1 : 0);
+  const selectedCurriculumItem =
+    curriculumItems.find(
+      (item) => `${item.strand}::${item.topic}::${item.learningOutcome}` === selectedCurriculumItemKey,
+    ) ?? null;
 
   useEffect(() => {
     if (!availableSubjects.some((option) => option.value === subject)) {
       setSubject(availableSubjects[0]?.value ?? "math");
     }
   }, [availableSubjects, subject]);
+
+  useEffect(() => {
+    if (selectedCurriculumItem) {
+      setDifficulty(selectedCurriculumItem.difficultySuggestion);
+    }
+  }, [selectedCurriculumItem]);
+
+  useEffect(() => {
+    async function fetchCurriculumItems() {
+      setIsCurriculumLoading(true);
+      setCurriculumMessage(null);
+
+      try {
+        const query = new URLSearchParams({
+          curriculum,
+          grade,
+          subject,
+        });
+
+        const response = await fetch(`${apiBaseUrl}/api/curriculum?${query.toString()}`);
+        if (!response.ok) {
+          throw new Error(`Request failed with status ${response.status}`);
+        }
+
+        const data = (await response.json()) as CurriculumMapItem[];
+        setCurriculumItems(data);
+
+        if (data.length === 0) {
+          setSelectedCurriculumItemKey("");
+          setCurriculumMessage(
+            "Curriculum map seed data is not available for this selection yet. The quiz can still continue with a generic prompt or hardcoded fallback.",
+          );
+          return;
+        }
+
+        const firstKey = `${data[0].strand}::${data[0].topic}::${data[0].learningOutcome}`;
+        setSelectedCurriculumItemKey((currentKey) =>
+          data.some(
+            (item) => `${item.strand}::${item.topic}::${item.learningOutcome}` === currentKey,
+          )
+            ? currentKey
+            : firstKey,
+        );
+        setCurriculumMessage(null);
+      } catch (requestError) {
+        setCurriculumItems([]);
+        setSelectedCurriculumItemKey("");
+        setCurriculumMessage(
+          requestError instanceof Error
+            ? `Unable to load curriculum guidance right now. ${requestError.message}`
+            : "Unable to load curriculum guidance right now.",
+        );
+      } finally {
+        setIsCurriculumLoading(false);
+      }
+    }
+
+    void fetchCurriculumItems();
+  }, [curriculum, grade, subject]);
 
   function resetCurrentQuestion() {
     setQuiz(null);
@@ -132,6 +224,51 @@ export default function App() {
     setQuestionNumber(0);
     setCorrectCount(0);
     setScore(0);
+    setSessionSummary(null);
+    setSessionReport(null);
+  }
+
+  function formatSeconds(seconds: number) {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+
+    if (minutes === 0) {
+      return `${remainingSeconds} sec`;
+    }
+
+    return `${minutes} min ${remainingSeconds} sec`;
+  }
+
+  async function copyReport() {
+    if (!sessionReport) {
+      return;
+    }
+
+    const reportText = [
+      "TrustOS Learn Report",
+      `Grade: ${sessionReport.grade}`,
+      `Curriculum: ${sessionReport.curriculum}`,
+      `Subject: ${sessionReport.subject}`,
+      `Topic: ${sessionReport.topic ?? "Generic practice"}`,
+      `Language: ${sessionReport.language}`,
+      `Total Questions: ${sessionReport.totalQuestions}`,
+      `Correct Answers: ${sessionReport.correctAnswers}`,
+      `Wrong Answers: ${sessionReport.wrongAnswers}`,
+      `Score Percentage: ${sessionReport.scorePercent}%`,
+      `Time Spent: ${formatSeconds(sessionReport.timeSpentSeconds)}`,
+      `Strongest Area: ${sessionReport.strongestArea}`,
+      `Weakest Area: ${sessionReport.weakestArea}`,
+      `Recommended Next Practice Topic: ${sessionReport.recommendedNextPracticeTopic}`,
+      `What the student did well: ${sessionReport.whatStudentDidWell}`,
+      `What the student should review: ${sessionReport.whatStudentShouldReview}`,
+      `Suggested next step: ${sessionReport.suggestedNextStep}`,
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(reportText);
+    } catch {
+      // Copy is best-effort only.
+    }
   }
 
   function updateScore(nextCorrectCount: number, nextAnsweredCount: number) {
@@ -161,6 +298,8 @@ export default function App() {
           subject,
           language,
           difficulty,
+          topic: selectedCurriculumItem?.topic,
+          learningOutcome: selectedCurriculumItem?.learningOutcome,
         }),
       });
 
@@ -195,12 +334,51 @@ export default function App() {
     setScreen("home");
   }
 
-  function handleStartQuiz() {
+  async function handleStartQuiz() {
     resetSession();
-    void fetchQuiz(1);
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/sessions/start`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sessionId: getStoredSessionId(),
+          grade,
+          curriculum,
+          subject,
+          language,
+          difficulty,
+          topic: selectedCurriculumItem?.topic,
+          learningOutcome: selectedCurriculumItem?.learningOutcome,
+          totalQuestions: TOTAL_QUESTIONS,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed with status ${response.status}`);
+      }
+
+      const session = (await response.json()) as { sessionId: string };
+      setActiveSessionId(session.sessionId);
+      setStoredSessionId(session.sessionId);
+      await fetchQuiz(1);
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Unable to start the learning session right now.",
+      );
+      setScreen("practice");
+    } finally {
+      setIsLoading(false);
+    }
   }
 
-  function handleSubmitAnswer() {
+  async function handleSubmitAnswer() {
     if (!quiz || !selectedAnswer || isSubmitted) {
       return;
     }
@@ -210,10 +388,63 @@ export default function App() {
     setIsSubmitted(true);
     setCorrectCount(nextCorrectCount);
     updateScore(nextCorrectCount, nextAnsweredCount);
+
+    if (!activeSessionId) {
+      return;
+    }
+
+    try {
+      await fetch(`${apiBaseUrl}/api/sessions/${activeSessionId}/attempt`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          quizId: quiz.id,
+          selectedAnswer,
+          correctAnswer: quiz.correctAnswer,
+          isCorrect: selectedAnswer === quiz.correctAnswer,
+          explanationShown: true,
+        }),
+      });
+    } catch {
+      // Best-effort tracking for anonymous sessions.
+    }
   }
 
-  function handleNextQuestion() {
+  async function handleNextQuestion() {
     if (!isSubmitted) {
+      return;
+    }
+
+    if (questionNumber >= TOTAL_QUESTIONS && activeSessionId) {
+      try {
+        await fetch(`${apiBaseUrl}/api/sessions/${activeSessionId}/complete`, {
+          method: "POST",
+        });
+
+        const summaryResponse = await fetch(`${apiBaseUrl}/api/sessions/${activeSessionId}/summary`);
+        if (!summaryResponse.ok) {
+          throw new Error(`Request failed with status ${summaryResponse.status}`);
+        }
+
+        const summary = (await summaryResponse.json()) as LearningSessionSummary;
+        const reportResponse = await fetch(`${apiBaseUrl}/api/sessions/${activeSessionId}/report`);
+        if (!reportResponse.ok) {
+          throw new Error(`Request failed with status ${reportResponse.status}`);
+        }
+
+        const report = (await reportResponse.json()) as LearningSessionReport;
+        setSessionSummary(summary);
+        setSessionReport(report);
+        setScreen("summary");
+      } catch (requestError) {
+        setError(
+          requestError instanceof Error
+            ? requestError.message
+            : "Unable to load the session summary right now.",
+        );
+      }
       return;
     }
 
@@ -329,13 +560,46 @@ export default function App() {
                 ))}
               </select>
             </label>
+
+            <label className="field">
+              <span>Topic / Learning Outcome</span>
+              <select
+                value={selectedCurriculumItemKey}
+                onChange={(event) => setSelectedCurriculumItemKey(event.target.value)}
+                disabled={isCurriculumLoading || curriculumItems.length === 0}
+              >
+                {curriculumItems.length === 0 ? (
+                  <option value="">
+                    {isCurriculumLoading ? "Loading curriculum map..." : "No seeded curriculum map yet"}
+                  </option>
+                ) : null}
+                {curriculumItems.map((item) => {
+                  const itemKey = `${item.strand}::${item.topic}::${item.learningOutcome}`;
+                  return (
+                    <option key={itemKey} value={itemKey}>
+                      {item.topic} - {item.learningOutcome}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
           </div>
 
           <div className="mini-note">
-            {language === "bilingual"
-              ? "Bilingual mode displays Khmer and English together. Language changes presentation only."
-              : "Language changes presentation only. Subject availability depends on grade and curriculum."}
+            {curriculumMessage
+              ? curriculumMessage
+              : language === "bilingual"
+                ? "Bilingual mode displays Khmer and English together. Language changes presentation only."
+                : "Language changes presentation only. Subject availability depends on grade and curriculum."}
           </div>
+
+          {selectedCurriculumItem ? (
+            <div className="mini-note">
+              <strong>{selectedCurriculumItem.strand}</strong>
+              <br />
+              {selectedCurriculumItem.learningOutcome}
+            </div>
+          ) : null}
 
           <div className="selection-summary">
             <span>{grades.find((item) => item.value === grade)?.label}</span>
@@ -343,13 +607,14 @@ export default function App() {
             <span>{labelMap[subject]}</span>
             <span>{labelMap[language]}</span>
             <span>{labelMap[difficulty]}</span>
+            {selectedCurriculumItem ? <span>{selectedCurriculumItem.topic}</span> : null}
           </div>
 
           <div className="actions actions-stack">
             <button type="button" className="secondary-button" onClick={handleBackToHome}>
               Back
             </button>
-            <button type="button" className="primary-button" onClick={handleStartQuiz}>
+            <button type="button" className="primary-button" onClick={() => void handleStartQuiz()}>
               Start Quiz
             </button>
           </div>
@@ -370,7 +635,7 @@ export default function App() {
           <div className="progress-grid">
             <div className="progress-card">
               <span>Question</span>
-              <strong>{questionNumber || 1}</strong>
+              <strong>{questionNumber || 1} / {TOTAL_QUESTIONS}</strong>
             </div>
             <div className="progress-card">
               <span>Correct</span>
@@ -388,6 +653,7 @@ export default function App() {
             <span>{labelMap[subject]}</span>
             <span>{labelMap[language]}</span>
             <span>{labelMap[difficulty]}</span>
+            {selectedCurriculumItem ? <span>{selectedCurriculumItem.topic}</span> : null}
           </div>
 
           <div className="mini-note">
@@ -467,7 +733,7 @@ export default function App() {
                 <button
                   type="button"
                   className="primary-button"
-                  onClick={handleSubmitAnswer}
+                  onClick={() => void handleSubmitAnswer()}
                   disabled={!selectedAnswer || isSubmitted}
                 >
                   Submit Answer
@@ -475,10 +741,10 @@ export default function App() {
                 <button
                   type="button"
                   className="secondary-button"
-                  onClick={handleNextQuestion}
+                  onClick={() => void handleNextQuestion()}
                   disabled={!isSubmitted || isLoading}
                 >
-                  Next Question
+                  {questionNumber >= TOTAL_QUESTIONS ? "Finish Quiz" : "Next Question"}
                 </button>
               </div>
 
@@ -505,11 +771,128 @@ export default function App() {
     );
   }
 
+  function renderSummary() {
+    return (
+      <section className="workspace workspace-single report-screen">
+        <article className="panel setup-panel report-panel">
+          <div className="panel-header">
+            <h2>Learning Report</h2>
+            <p>Your learning session is stored anonymously on this device and in the API only.</p>
+          </div>
+
+          {sessionSummary && sessionReport ? (
+            <>
+              <div className="progress-grid">
+                <div className="progress-card">
+                  <span>Grade</span>
+                  <strong>{sessionReport.grade}</strong>
+                </div>
+                <div className="progress-card">
+                  <span>Curriculum</span>
+                  <strong>{sessionReport.curriculum}</strong>
+                </div>
+                <div className="progress-card">
+                  <span>Subject</span>
+                  <strong>{sessionReport.subject}</strong>
+                </div>
+                <div className="progress-card">
+                  <span>Topic</span>
+                  <strong>{sessionReport.topic ?? "Generic practice"}</strong>
+                </div>
+              </div>
+
+              <div className="report-grid">
+                <div className="report-card">
+                  <span>Language</span>
+                  <strong>{sessionReport.language}</strong>
+                </div>
+                <div className="report-card">
+                  <span>Total Questions</span>
+                  <strong>{sessionReport.totalQuestions}</strong>
+                </div>
+                <div className="report-card">
+                  <span>Correct Answers</span>
+                  <strong>{sessionReport.correctAnswers}</strong>
+                </div>
+                <div className="report-card">
+                  <span>Wrong Answers</span>
+                  <strong>{sessionReport.wrongAnswers}</strong>
+                </div>
+                <div className="report-card">
+                  <span>Score Percentage</span>
+                  <strong>{sessionReport.scorePercent}%</strong>
+                </div>
+                <div className="report-card">
+                  <span>Time Spent</span>
+                  <strong>{formatSeconds(sessionReport.timeSpentSeconds)}</strong>
+                </div>
+              </div>
+
+              <div className="report-grid report-grid-secondary">
+                <div className="report-card">
+                  <span>Strongest Area</span>
+                  <strong>{sessionReport.strongestArea}</strong>
+                </div>
+                <div className="report-card">
+                  <span>Weakest Area</span>
+                  <strong>{sessionReport.weakestArea}</strong>
+                </div>
+                <div className="report-card report-card-wide">
+                  <span>Recommended Next Practice Topic</span>
+                  <strong>{sessionReport.recommendedNextPracticeTopic}</strong>
+                </div>
+              </div>
+
+              <div className="mini-note report-note">
+                <strong>What the student did well</strong>
+                <br />
+                {sessionReport.whatStudentDidWell}
+              </div>
+
+              <div className="mini-note report-note">
+                <strong>What the student should review</strong>
+                <br />
+                {sessionReport.whatStudentShouldReview}
+              </div>
+
+              <div className="mini-note report-note">
+                <strong>Suggested next step</strong>
+                <br />
+                {sessionReport.suggestedNextStep}
+              </div>
+            </>
+          ) : (
+            <section className="feedback feedback-pending">
+              <h4>Summary unavailable</h4>
+              <p>We could not load the summary for this anonymous session.</p>
+            </section>
+          )}
+
+          <div className="actions actions-stack">
+            <button type="button" className="secondary-button print-hidden" onClick={() => void copyReport()}>
+              Copy Report
+            </button>
+            <button type="button" className="secondary-button print-hidden" onClick={() => window.print()}>
+              Print Report
+            </button>
+            <button type="button" className="secondary-button" onClick={handleBackToHome}>
+              Back Home
+            </button>
+            <button type="button" className="primary-button" onClick={() => setScreen("setup")}>
+              Start New Practice
+            </button>
+          </div>
+        </article>
+      </section>
+    );
+  }
+
   return (
     <main className="app-shell">
       {screen === "home" ? renderHome() : null}
       {screen === "setup" ? renderSetup() : null}
       {screen === "practice" ? renderPractice() : null}
+      {screen === "summary" ? renderSummary() : null}
     </main>
   );
 }

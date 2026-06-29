@@ -1,11 +1,31 @@
 import cors from "cors";
 import express from "express";
+import { getCurriculumMapItems } from "./curriculum";
+import {
+  approveQuizDraft,
+  createQuizDraft,
+  findApprovedQuizForSelection,
+  listApprovedQuizzes,
+  listQuizDrafts,
+  rejectQuizDraft,
+} from "./quiz-store";
+import {
+  completeLearningSession,
+  getLearningSessionReport,
+  getLearningSessionSummary,
+  recordQuizAttempt,
+  startLearningSession,
+} from "./session-store";
 import type {
   CurriculumCode,
+  CurriculumMapItem,
   DifficultyLevel,
   GeneratedQuizResponse,
   GradeLevel,
   LanguageMode,
+  LearningSessionReport,
+  LearningSessionSummary,
+  PersistedQuizRecord,
   SampleQuizResponse,
   SubjectCode,
 } from "./types";
@@ -69,6 +89,7 @@ type NormalizedGenerateRequest = {
   difficultyCode: DifficultyLevel;
   difficultyLabel: string;
   topic?: string;
+  learningOutcome?: string;
 };
 
 type GeneratedQuizContent = {
@@ -632,6 +653,10 @@ function parseDifficultyCode(value: unknown): DifficultyLevel | null {
   return null;
 }
 
+function normalizeSessionId(value: unknown) {
+  return isNonEmptyString(value) ? value.trim() : undefined;
+}
+
 function normalizeGenerateRequest(body: unknown): { data?: NormalizedGenerateRequest; error?: string } {
   if (!body || typeof body !== "object") {
     return { error: "Request body must be a JSON object" };
@@ -668,6 +693,9 @@ function normalizeGenerateRequest(body: unknown): { data?: NormalizedGenerateReq
   }
 
   const topic = isNonEmptyString(payload.topic) ? payload.topic.trim() : undefined;
+  const learningOutcome = isNonEmptyString(payload.learningOutcome)
+    ? payload.learningOutcome.trim()
+    : undefined;
 
   return {
     data: {
@@ -682,6 +710,7 @@ function normalizeGenerateRequest(body: unknown): { data?: NormalizedGenerateReq
       difficultyCode,
       difficultyLabel: difficultyLabels[difficultyCode],
       topic,
+      learningOutcome,
     },
   };
 }
@@ -742,6 +771,21 @@ function buildFallbackQuizResponse(request: NormalizedGenerateRequest): Generate
   );
 }
 
+function buildStoredQuizResponse(quiz: PersistedQuizRecord): GeneratedQuizResponse {
+  return {
+    id: quiz.id,
+    grade: getGradeNumber(quiz.grade),
+    curriculum: curriculumLabels[quiz.curriculum],
+    subject: subjectLabels[quiz.subject],
+    language: languageLabels[quiz.language],
+    difficulty: difficultyLabels[quiz.difficulty],
+    question: quiz.question,
+    choices: quiz.choices,
+    correctAnswer: quiz.correctAnswer,
+    explanation: quiz.explanation,
+  };
+}
+
 async function generateQuizWithOpenAI(request: NormalizedGenerateRequest): Promise<GeneratedQuizResponse> {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) {
@@ -753,6 +797,7 @@ async function generateQuizWithOpenAI(request: NormalizedGenerateRequest): Promi
     "You create one student-friendly multiple choice quiz question. " +
     "Return JSON only. The question must be safe, age-appropriate, factually simple, and aligned to the requested curriculum, subject, grade, language, and difficulty. " +
     "Language is for presentation only. Keep the academic content aligned to the selected grade, curriculum, and subject. " +
+    "When a learning outcome is provided, use it as the main instructional target for the question. " +
     "If language is Khmer, write natural Khmer for students. If language is Bilingual, write Khmer and English side by side. " +
     "The explanation must teach the concept clearly in a few step-by-step sentences.";
 
@@ -766,6 +811,7 @@ async function generateQuizWithOpenAI(request: NormalizedGenerateRequest): Promi
       language: request.languageLabel,
       difficulty: request.difficultyLabel,
       topic: request.topic ?? null,
+      learningOutcome: request.learningOutcome ?? null,
     },
   });
 
@@ -843,6 +889,119 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
 
+app.get("/api/curriculum", (req, res) => {
+  const { curriculum, grade, subject } = req.query;
+
+  if (!isCurriculumCode(curriculum)) {
+    res.status(400).json({ ok: false, error: "Invalid or missing curriculum query parameter" });
+    return;
+  }
+
+  if (!isGradeLevel(grade)) {
+    res.status(400).json({ ok: false, error: "Invalid or missing grade query parameter" });
+    return;
+  }
+
+  if (!isSubjectCode(subject)) {
+    res.status(400).json({ ok: false, error: "Invalid or missing subject query parameter" });
+    return;
+  }
+
+  const items = getCurriculumMapItems({ curriculum, grade, subject });
+  res.json(items satisfies CurriculumMapItem[]);
+});
+
+app.post("/api/sessions/start", async (req, res) => {
+  const normalized = normalizeGenerateRequest(req.body);
+
+  if (!normalized.data) {
+    res.status(400).json({ ok: false, error: normalized.error });
+    return;
+  }
+
+  const payload = req.body as Record<string, unknown>;
+  const totalQuestions =
+    typeof payload.totalQuestions === "number" && Number.isInteger(payload.totalQuestions) && payload.totalQuestions > 0
+      ? payload.totalQuestions
+      : 5;
+
+  const session = await startLearningSession({
+    sessionId: normalizeSessionId(payload.sessionId),
+    grade: normalized.data.gradeCode,
+    curriculum: normalized.data.curriculumCode,
+    subject: normalized.data.subjectCode,
+    language: normalized.data.languageCode,
+    topic: normalized.data.topic,
+    totalQuestions,
+  });
+
+  res.status(201).json(session);
+});
+
+app.post("/api/sessions/:sessionId/attempt", async (req, res) => {
+  const body = req.body as Record<string, unknown>;
+
+  if (
+    !isNonEmptyString(body.quizId) ||
+    !isNonEmptyString(body.selectedAnswer) ||
+    !isNonEmptyString(body.correctAnswer) ||
+    typeof body.isCorrect !== "boolean" ||
+    typeof body.explanationShown !== "boolean"
+  ) {
+    res.status(400).json({ ok: false, error: "Invalid attempt payload" });
+    return;
+  }
+
+  const attempt = await recordQuizAttempt({
+    sessionId: req.params.sessionId,
+    quizId: body.quizId,
+    selectedAnswer: body.selectedAnswer,
+    correctAnswer: body.correctAnswer,
+    isCorrect: body.isCorrect,
+    explanationShown: body.explanationShown,
+  });
+
+  if (!attempt) {
+    res.status(404).json({ ok: false, error: "Session not found" });
+    return;
+  }
+
+  res.status(201).json(attempt);
+});
+
+app.post("/api/sessions/:sessionId/complete", async (req, res) => {
+  const session = await completeLearningSession(req.params.sessionId);
+
+  if (!session) {
+    res.status(404).json({ ok: false, error: "Session not found" });
+    return;
+  }
+
+  res.json(session);
+});
+
+app.get("/api/sessions/:sessionId/summary", async (req, res) => {
+  const summary = await getLearningSessionSummary(req.params.sessionId);
+
+  if (!summary) {
+    res.status(404).json({ ok: false, error: "Session not found" });
+    return;
+  }
+
+  res.json(summary satisfies LearningSessionSummary);
+});
+
+app.get("/api/sessions/:sessionId/report", async (req, res) => {
+  const report = await getLearningSessionReport(req.params.sessionId);
+
+  if (!report) {
+    res.status(404).json({ ok: false, error: "Session not found" });
+    return;
+  }
+
+  res.json(report satisfies LearningSessionReport);
+});
+
 app.get("/api/quiz/sample", (req, res) => {
   const { grade, curriculum, subject, language } = req.query;
 
@@ -861,6 +1020,14 @@ app.get("/api/quiz/sample", (req, res) => {
 
   if (!isSubjectCode(subject)) {
     res.status(400).json({ ok: false, error: "Invalid or missing subject query parameter" });
+    return;
+  }
+
+  if (!getAvailableSubjectsBySelection(grade, curriculum).includes(subject)) {
+    res.status(400).json({
+      ok: false,
+      error: "Selected subject is not available for this grade and curriculum",
+    });
     return;
   }
 
@@ -906,46 +1073,142 @@ app.post("/api/quiz/generate", async (req, res) => {
   console.log(
     JSON.stringify({
       level: "info",
-      event: "quiz_generate_started",
+      event: "quiz_session_started",
       grade: request.gradeNumber,
       curriculum: request.curriculumLabel,
       subject: request.subjectLabel,
       language: request.languageLabel,
       difficulty: request.difficultyLabel,
       topic: request.topic ?? null,
+      learningOutcome: request.learningOutcome ?? null,
       ts: new Date().toISOString(),
     }),
   );
 
   try {
-    const quiz = await generateQuizWithOpenAI(request);
+    const approvedQuiz = await findApprovedQuizForSelection({
+      grade: request.gradeCode,
+      curriculum: request.curriculumCode,
+      subject: request.subjectCode,
+      language: request.languageCode,
+    });
 
+    if (approvedQuiz) {
+      console.log(
+        JSON.stringify({
+          level: "info",
+          event: "quiz_session_approved_served",
+          id: approvedQuiz.id,
+          ts: new Date().toISOString(),
+        }),
+      );
+
+      res.json(buildStoredQuizResponse(approvedQuiz) satisfies GeneratedQuizResponse);
+      return;
+    }
+  } catch (error) {
     console.log(
       JSON.stringify({
-        level: "info",
-        event: "quiz_generate_success",
-        id: quiz.id,
-        model: process.env.OPENAI_MODEL?.trim() || "gpt-4.1-mini",
+        level: "warn",
+        event: "quiz_session_approved_lookup_failed",
+        message: error instanceof Error ? error.message : "Unknown approved quiz lookup error",
         ts: new Date().toISOString(),
       }),
     );
+  }
 
-    res.json(quiz satisfies GeneratedQuizResponse);
+  const fallbackQuiz = buildFallbackQuizResponse(request);
+
+  console.log(
+    JSON.stringify({
+      level: "info",
+      event: "quiz_session_hardcoded_served",
+      fallbackId: fallbackQuiz.id,
+      ts: new Date().toISOString(),
+    }),
+  );
+
+  res.json(fallbackQuiz satisfies GeneratedQuizResponse);
+});
+
+app.post("/api/quiz/generate-draft", async (req, res) => {
+  const normalized = normalizeGenerateRequest(req.body);
+
+  if (!normalized.data) {
+    res.status(400).json({ ok: false, error: normalized.error });
+    return;
+  }
+
+  const request = normalized.data;
+
+  let generatedQuiz: GeneratedQuizResponse;
+  let source: PersistedQuizRecord["source"] = "ai";
+
+  try {
+    generatedQuiz = await generateQuizWithOpenAI(request);
   } catch (error) {
-    const fallbackQuiz = buildFallbackQuizResponse(request);
+    source = "hardcoded";
+    generatedQuiz = buildFallbackQuizResponse(request);
 
     console.log(
       JSON.stringify({
         level: "warn",
-        event: "quiz_generate_fallback",
-        message: error instanceof Error ? error.message : "Unknown OpenAI generation error",
-        fallbackId: fallbackQuiz.id,
+        event: "quiz_generate_draft_fallback",
+        message: error instanceof Error ? error.message : "Unknown quiz generation error",
+        draftId: generatedQuiz.id,
         ts: new Date().toISOString(),
       }),
     );
-
-    res.json(fallbackQuiz satisfies GeneratedQuizResponse);
   }
+
+  const draft = await createQuizDraft({
+    id: generatedQuiz.id,
+    grade: request.gradeCode,
+    curriculum: request.curriculumCode,
+    subject: request.subjectCode,
+    language: request.languageCode,
+    difficulty: request.difficultyCode,
+    topic: request.topic,
+    question: generatedQuiz.question,
+    choices: generatedQuiz.choices,
+    correctAnswer: generatedQuiz.correctAnswer,
+    explanation: generatedQuiz.explanation,
+    source,
+  });
+
+  res.status(201).json(draft);
+});
+
+app.get("/api/quiz/drafts", async (_req, res) => {
+  const drafts = await listQuizDrafts();
+  res.json(drafts);
+});
+
+app.post("/api/quiz/drafts/:id/approve", async (req, res) => {
+  const approved = await approveQuizDraft(req.params.id);
+
+  if (!approved) {
+    res.status(404).json({ ok: false, error: "Draft not found" });
+    return;
+  }
+
+  res.json(approved);
+});
+
+app.post("/api/quiz/drafts/:id/reject", async (req, res) => {
+  const rejected = await rejectQuizDraft(req.params.id);
+
+  if (!rejected) {
+    res.status(404).json({ ok: false, error: "Draft not found" });
+    return;
+  }
+
+  res.json(rejected);
+});
+
+app.get("/api/quiz/approved", async (_req, res) => {
+  const approvedQuizzes = await listApprovedQuizzes();
+  res.json(approvedQuizzes);
 });
 
 app.listen(port, () => {

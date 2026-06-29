@@ -17,7 +17,7 @@ packages/
 
 - Keep frontend and backend independently deployable
 - Share core curriculum and quiz types in one package
-- Stay simple until authentication, persistence, and AI workflows are ready
+- Stay simple while adding only the persistence and AI foundations needed for quiz review and session tracking
 - Preserve an easy path to Railway deployment for the API
 
 ## Application Responsibilities
@@ -26,22 +26,33 @@ packages/
 
 - Deliver the learner-facing TrustOS Learn experience
 - Render curriculum, grade, and language-aware UI
+- Store an anonymous `sessionId` in `sessionStorage` for privacy-friendly session tracking
 - Consume the API over HTTP
 
 ### `apps/api`
 
 - Expose quiz and curriculum-related APIs
 - Provide a deployable Node.js service boundary
-- Act as the future integration point for authentication, data storage, and AI services
+- Use Prisma with PostgreSQL for quiz review data and anonymous learning sessions
+- Act as the future integration point for authentication and deeper AI services
 
 ### `packages/shared`
 
 - Define reusable domain types
 - Reduce schema drift between frontend and backend
 
+## Current Data Flows
+
+- Curriculum map:
+  The web app calls `GET /api/curriculum` to load seeded topic and learning-outcome guidance for the selected curriculum, grade, and subject.
+- Quiz review:
+  AI-generated drafts are stored in PostgreSQL, reviewed, then moved into approved or rejected quiz tables.
+- Anonymous learning sessions:
+  The web app starts an anonymous session, saves each quiz attempt, completes the session at the end of the run, and requests a summary with score and recommended next topic.
+
 ## Current Non-Goals
 
 - No authentication
-- No database
-- No OpenAI or other AI provider integration
+- No student profile or cross-device identity
+- No payments
 - No background jobs

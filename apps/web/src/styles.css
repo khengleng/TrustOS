@@ -413,6 +413,59 @@ h1 {
   color: #991b1b;
 }
 
+.report-screen {
+  align-items: stretch;
+}
+
+.report-panel {
+  max-width: 52rem;
+}
+
+.report-grid {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.report-grid-secondary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.report-card {
+  padding: 1rem;
+  border-radius: 1rem;
+  background: linear-gradient(180deg, #f8fafc 0%, #eef6ff 100%);
+}
+
+.report-card span,
+.report-card strong {
+  display: block;
+}
+
+.report-card span {
+  font-size: 0.9rem;
+  color: #475569;
+}
+
+.report-card strong {
+  margin-top: 0.35rem;
+  color: #0f172a;
+  line-height: 1.45;
+}
+
+.report-card-wide {
+  grid-column: 1 / -1;
+}
+
+.report-note strong {
+  color: #0f172a;
+}
+
+.print-hidden {
+  display: inline-flex;
+}
+
 @media (max-width: 900px) {
   .hero-home,
   .workspace {
@@ -430,5 +483,37 @@ h1 {
 
   h1 {
     max-width: 14ch;
+  }
+
+  .report-grid,
+  .report-grid-secondary {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media print {
+  :root {
+    background: #fff;
+  }
+
+  body {
+    background: #fff;
+  }
+
+  .app-shell {
+    width: 100%;
+    padding: 0;
+  }
+
+  .panel,
+  .hero-copy,
+  .hero-card {
+    box-shadow: none;
+    background: #fff;
+    border-color: rgba(15, 23, 42, 0.12);
+  }
+
+  .print-hidden {
+    display: none !important;
   }
 }

@@ -31,3 +31,63 @@ export interface QuizResponse {
   correctAnswer: string;
   explanation: string;
 }
+
+export interface CurriculumMapItem {
+  curriculum: CurriculumCode;
+  grade: GradeSelection;
+  subject: SubjectCode;
+  strand: string;
+  topic: string;
+  learningOutcome: string;
+  difficultySuggestion: DifficultyLevel;
+}
+
+export interface LearningSessionRecord {
+  id: string;
+  sessionId: string;
+  grade: GradeSelection;
+  curriculum: CurriculumCode;
+  subject: SubjectCode;
+  language: LanguageMode;
+  topic?: string | null;
+  totalQuestions: number;
+  correctAnswers: number;
+  wrongAnswers: number;
+  scorePercent: number;
+  startedAt: string;
+  completedAt?: string | null;
+}
+
+export interface LearningSessionSummary {
+  session: LearningSessionRecord;
+  attempts: Array<{
+    id: string;
+    sessionId: string;
+    quizId: string;
+    selectedAnswer: string;
+    correctAnswer: string;
+    isCorrect: boolean;
+    explanationShown: boolean;
+    createdAt: string;
+  }>;
+  recommendedNextTopic: string;
+}
+
+export interface LearningSessionReport {
+  grade: GradeSelection;
+  curriculum: CurriculumCode;
+  subject: SubjectCode;
+  topic?: string | null;
+  language: LanguageMode;
+  totalQuestions: number;
+  correctAnswers: number;
+  wrongAnswers: number;
+  scorePercent: number;
+  timeSpentSeconds: number;
+  strongestArea: string;
+  weakestArea: string;
+  recommendedNextPracticeTopic: string;
+  whatStudentDidWell: string;
+  whatStudentShouldReview: string;
+  suggestedNextStep: string;
+}
